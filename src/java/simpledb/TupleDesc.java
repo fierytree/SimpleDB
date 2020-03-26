@@ -220,9 +220,7 @@ public class TupleDesc implements Serializable {
     }
 
     public int hashCode() {
-        // If you want to use TupleDesc as keys for HashMap, implement this so
-        // that equal objects have equals hashCode() results
-        throw new UnsupportedOperationException("unimplemented");
+        return toString().hashCode();
     }
 
     /**
@@ -233,7 +231,11 @@ public class TupleDesc implements Serializable {
      * @return String describing this descriptor.
      */
     public String toString() {
-        // some code goes here
-        return "";
+        StringBuilder sb = new StringBuilder();
+        for(int i=0;i<items.size()-1;++i){
+            sb.append(items.get(i).fieldName).append("(").append(items.get(i).fieldType).append("), ");
+        }
+        sb.append(items.get(items.size() - 1).fieldName).append("(").append(items.get(items.size() - 1).fieldType).append(")");
+        return sb.toString();
     }
 }

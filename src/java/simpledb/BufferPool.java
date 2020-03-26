@@ -16,6 +16,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
+    private ConcurrentHashMap<Page,TransactionId> pages;
+    private ConcurrentHashMap<PageId,Permissions> per;
+
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
@@ -32,7 +35,8 @@ public class BufferPool {
      * @param numPages maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
-        // some code goes here
+        pages=new ConcurrentHashMap<>(numPages);
+        per=new ConcurrentHashMap<>(numPages);
     }
     
     public static int getPageSize() {
@@ -66,7 +70,23 @@ public class BufferPool {
      */
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        // some code goes here
+        for(ConcurrentHashMap.Entry<Page,TransactionId> item:pages.entrySet()){
+            if(item.getKey().getId()==pid&&perm.permLevel>per.get(pid).permLevel){
+                if(item.getValue()!=null)
+                    throw new TransactionAbortedException();
+                else{
+                    item.setValue(tid);
+                    return item.getKey();
+                }
+            }
+
+        }
+        if(pages.size()<pageSize){
+            DbFile dbfile = Database.getCatalog().getDatabaseFile(pid.getTableId());
+            pages.put(dbfile.readPage(pid),tid);
+            per.put(pid,perm);
+        }
+        else throw new DbException("");
         return null;
     }
 

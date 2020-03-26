@@ -65,21 +65,17 @@ public class HeapPage implements Page {
     /** Retrieve the number of tuples on this page.
         @return the number of tuples on this page
     */
-    private int getNumTuples() {        
-        // some code goes here
-        return 0;
-
+    private int getNumTuples() {
+        int size=td.getSize();
+        return (BufferPool.getPageSize()*8) / (size * 8 + 1);
     }
 
     /**
      * Computes the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      * @return the number of bytes in the header of a page in a HeapFile with each tuple occupying tupleSize bytes
      */
-    private int getHeaderSize() {        
-        
-        // some code goes here
-        return 0;
-                 
+    private int getHeaderSize() {
+        return (int)Math.ceil(numSlots / 8.0);
     }
     
     /** Return a view of this page before it was modified
@@ -111,8 +107,7 @@ public class HeapPage implements Page {
      * @return the PageId associated with this page.
      */
     public HeapPageId getId() {
-    // some code goes here
-    throw new UnsupportedOperationException("implement this");
+        return pid;
     }
 
     /**
@@ -281,24 +276,35 @@ public class HeapPage implements Page {
      * Returns the number of empty slots on this page.
      */
     public int getNumEmptySlots() {
-        // some code goes here
-        return 0;
+        int sum=0;
+        for(int i=0;i<numSlots;i++){
+            int k=1<<(i%8);
+            int judge=(header[i/8]&k)==k?1:0;
+            if(judge==0)
+                sum++;
+        }
+        return sum;
     }
 
     /**
      * Returns true if associated slot on this page is filled.
      */
     public boolean isSlotUsed(int i) {
-        // some code goes here
-        return false;
+        int k=1<<(i%8);
+        int judge=(header[i/8]&k)==k?1:0;
+        return judge != 0;
     }
 
     /**
      * Abstraction to fill or clear a slot on this page.
      */
     private void markSlotUsed(int i, boolean value) {
-        // some code goes here
-        // not necessary for lab1
+        int m= (!value ?0:1)<<(i%8);
+        int k=1<<(i%8);
+        int judge=(header[i/8]&k)==k?1:0;
+        if(judge==0)
+            header[i/8]=(byte)(header[i/8]|m);
+        else header[i/8]=(byte)(header[i/8]&m);
     }
 
     /**
@@ -306,8 +312,26 @@ public class HeapPage implements Page {
      * (note that this iterator shouldn't return tuples in empty slots!)
      */
     public Iterator<Tuple> iterator() {
-        // some code goes here
-        return null;
+        return new Iterator<Tuple>() {
+            private int nextSlot = 0;
+
+            public boolean hasNext() {
+                if(getNumEmptySlots()<=numSlots-nextSlot)
+                    return false;
+                return nextSlot < numSlots;
+            }
+
+            public Tuple next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                return tuples[nextSlot++];
+            }
+
+            public void remove() {
+                throw new UnsupportedOperationException("[INFO] removal is not allowed");
+            }
+        };
     }
 
 }
