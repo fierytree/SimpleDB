@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * The BufferPool is also responsible for locking;  when a transaction fetches
  * a page, BufferPool checks that the transaction has the appropriate
  * locks to read/write the page.
- * 
+ *
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
@@ -23,7 +23,7 @@ public class BufferPool {
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
     private static int pageSize = DEFAULT_PAGE_SIZE;
-    
+
     /** Default number of pages passed to the constructor. This is used by
     other classes. BufferPool should use the numPages argument to the
     constructor instead. */
@@ -38,16 +38,16 @@ public class BufferPool {
         pages=new ConcurrentHashMap<>(numPages);
         per=new ConcurrentHashMap<>(numPages);
     }
-    
+
     public static int getPageSize() {
       return pageSize;
     }
-    
+
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void setPageSize(int pageSize) {
     	BufferPool.pageSize = pageSize;
     }
-    
+
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void resetPageSize() {
     	BufferPool.pageSize = DEFAULT_PAGE_SIZE;
@@ -71,23 +71,19 @@ public class BufferPool {
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         for(ConcurrentHashMap.Entry<Page,TransactionId> item:pages.entrySet()){
-            if(item.getKey().getId()==pid&&perm.permLevel>per.get(pid).permLevel){
-                if(item.getValue()!=null)
-                    throw new TransactionAbortedException();
-                else{
-                    item.setValue(tid);
-                    return item.getKey();
-                }
+            if(item.getKey().getId().equals(pid)&&perm.permLevel>=per.get(pid).permLevel){
+                item.setValue(tid);
+                return item.getKey();
             }
-
         }
         if(pages.size()<pageSize){
             DbFile dbfile = Database.getCatalog().getDatabaseFile(pid.getTableId());
-            pages.put(dbfile.readPage(pid),tid);
+            Page p=dbfile.readPage(pid);
+            pages.put(p,tid);
             per.put(pid,perm);
+            return p;
         }
         else throw new DbException("");
-        return null;
     }
 
     /**

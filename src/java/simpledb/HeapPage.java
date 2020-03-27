@@ -4,7 +4,7 @@ import java.util.*;
 import java.io.*;
 
 /**
- * Each instance of HeapPage stores data for one page of HeapFiles and 
+ * Each instance of HeapPage stores data for one page of HeapFiles and
  * implements the Page interface that is used by BufferPool.
  *
  * @see HeapFile
@@ -48,7 +48,7 @@ public class HeapPage implements Page {
         header = new byte[getHeaderSize()];
         for (int i=0; i<header.length; i++)
             header[i] = dis.readByte();
-        
+
         tuples = new Tuple[numSlots];
         try{
             // allocate and read the actual records of this page
@@ -77,7 +77,7 @@ public class HeapPage implements Page {
     private int getHeaderSize() {
         return (int)Math.ceil(numSlots / 8.0);
     }
-    
+
     /** Return a view of this page before it was modified
         -- used by recovery */
     public HeapPage getBeforeImage(){
@@ -95,7 +95,7 @@ public class HeapPage implements Page {
         }
         return null;
     }
-    
+
     public void setBeforeImage() {
         synchronized(oldDataLock)
         {
@@ -191,7 +191,7 @@ public class HeapPage implements Page {
                 Field f = tuples[i].getField(j);
                 try {
                     f.serialize(dos);
-                
+
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -269,7 +269,7 @@ public class HeapPage implements Page {
     public TransactionId isDirty() {
         // some code goes here
 	// Not necessary for lab1
-        return null;      
+        return null;
     }
 
     /**
@@ -312,26 +312,13 @@ public class HeapPage implements Page {
      * (note that this iterator shouldn't return tuples in empty slots!)
      */
     public Iterator<Tuple> iterator() {
-        return new Iterator<Tuple>() {
-            private int nextSlot = 0;
-
-            public boolean hasNext() {
-                if(getNumEmptySlots()<=numSlots-nextSlot)
-                    return false;
-                return nextSlot < numSlots;
+        ArrayList<Tuple> Tuples = new ArrayList<Tuple>();
+        for(int i=0;i<numSlots;i++){
+            if(isSlotUsed(i)){
+                Tuples.add(tuples[i]);
             }
-
-            public Tuple next() {
-                if (!hasNext()) {
-                    throw new NoSuchElementException();
-                }
-                return tuples[nextSlot++];
-            }
-
-            public void remove() {
-                throw new UnsupportedOperationException("[INFO] removal is not allowed");
-            }
-        };
+        }
+        return Tuples.iterator();
     }
 
 }
