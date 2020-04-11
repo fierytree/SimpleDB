@@ -1,11 +1,22 @@
 package simpledb;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+import static simpledb.Type.INT_TYPE;
+
 /**
  * Knows how to compute some aggregate over a set of StringFields.
  */
 public class StringAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
+    private int gbfield;
+    private Type gbfieldtype;
+    private int afield;
+    private Op what;
+    private Map<Field,Integer> result;
 
     /**
      * Aggregate constructor
@@ -17,7 +28,8 @@ public class StringAggregator implements Aggregator {
      */
 
     public StringAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
-        // some code goes here
+        this.afield=afield;this.gbfield=gbfield;this.what=what;this.gbfieldtype=gbfieldtype;
+        result=new HashMap<>();
     }
 
     /**
@@ -25,7 +37,17 @@ public class StringAggregator implements Aggregator {
      * @param tup the Tuple containing an aggregate field and a group-by field
      */
     public void mergeTupleIntoGroup(Tuple tup) {
-        // some code goes here
+//        if(what!=Op.COUNT)
+//            throw new IllegalArgumentException();
+        Field tmp=tup.getField(gbfield);
+        StringField v=(StringField)tup.getField(afield);
+        String value=v.getValue();
+        if (!result.containsKey(tmp)){
+            result.put(tmp, 1);
+        }
+        else{
+            result.replace(tmp,result.get(tmp)+1);
+        }
     }
 
     /**
@@ -37,8 +59,59 @@ public class StringAggregator implements Aggregator {
      *   aggregate specified in the constructor.
      */
     public OpIterator iterator() {
-        // some code goes here
-        throw new UnsupportedOperationException("please implement me for lab2");
+        return new StringAggIterator();
+    }
+    private class StringAggIterator implements OpIterator{
+        private Iterator<Map.Entry<Field, Integer>> it;
+        private TupleDesc td;
+        StringAggIterator(){
+            it=result.entrySet().iterator();
+            if(gbfieldtype==null){
+                td=new TupleDesc(new Type[]{INT_TYPE},new String[]{"aggregateVal"});
+            }
+            else{
+                td=new TupleDesc(new Type[]{gbfieldtype,INT_TYPE},new String[]{"groupVal","aggregateVal"});
+            }
+        }
+
+        @Override
+        public TupleDesc getTupleDesc() {
+            return td;
+        }
+
+        @Override
+        public void open() throws DbException, TransactionAbortedException {
+
+        }
+
+        @Override
+        public void close() {
+            it=null;
+        }
+
+        @Override
+        public void rewind() throws DbException, TransactionAbortedException {
+            it=result.entrySet().iterator();
+        }
+
+        @Override
+        public boolean hasNext() throws DbException, TransactionAbortedException {
+            return it.hasNext();
+        }
+
+        @Override
+        public Tuple next() throws DbException, TransactionAbortedException{
+            Tuple t=new Tuple(td);
+            if(gbfieldtype==null){
+                t.setField(0,new IntField(it.next().getValue()));
+            }
+            else{
+                Map.Entry<Field, Integer> entry=it.next();
+                t.setField(0,entry.getKey());
+                t.setField(1,new IntField(entry.getValue()));
+            }
+            return t;
+        }
     }
 
 }

@@ -30,7 +30,7 @@ public class Tuple implements Serializable {
         for(int i=0;i<td.numFields();i++){
             if(td.getFieldType(i)==Type.INT_TYPE)
                 fields.add(new IntField(0));
-            else fields.add(new StringField(null,0));
+            else fields.add(new StringField("",0));
         }
         recordId=null;
     }
