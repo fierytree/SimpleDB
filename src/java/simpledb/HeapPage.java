@@ -21,6 +21,8 @@ public class HeapPage implements Page {
 
     byte[] oldData;
     private final Byte oldDataLock=new Byte((byte)0);
+    TransactionId tid;
+    boolean dirty;
 
     /**
      * Create a HeapPage from a set of bytes of data read from disk.
@@ -39,6 +41,7 @@ public class HeapPage implements Page {
      * @see BufferPool#getPageSize()
      */
     public HeapPage(HeapPageId id, byte[] data) throws IOException {
+        dirty=false;tid=null;
         this.pid = id;
         this.td = Database.getCatalog().getTupleDesc(id.getTableId());
         this.numSlots = getNumTuples();
@@ -238,8 +241,18 @@ public class HeapPage implements Page {
      * @param t The tuple to delete
      */
     public void deleteTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        int i=0;
+        for(;i<numSlots;i++){
+            if(tuples[i].equals(t)){
+                tuples[i]=null;
+                break;
+            }
+        }
+        if(i==numSlots){
+            throw new DbException("tuple not found");
+        }
+        int k=1<<(i%8);
+        header[i/8]-=k;
     }
 
     /**
@@ -250,8 +263,17 @@ public class HeapPage implements Page {
      * @param t The tuple to add.
      */
     public void insertTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        int i=0;
+        for(;i<numSlots;i++){
+            if(!isSlotUsed(i)){
+                tuples[i]=t;
+                markSlotUsed(i,true);
+                break;
+            }
+        }
+        if(i==numSlots){
+            throw new DbException("no space for tuple");
+        }
     }
 
     /**
@@ -259,16 +281,16 @@ public class HeapPage implements Page {
      * that did the dirtying
      */
     public void markDirty(boolean dirty, TransactionId tid) {
-        // some code goes here
-	// not necessary for lab1
+        this.dirty=dirty;
+        this.tid=tid;
     }
 
     /**
      * Returns the tid of the transaction that last dirtied this page, or null if the page is not dirty
      */
     public TransactionId isDirty() {
-        // some code goes here
-	// Not necessary for lab1
+        if(dirty)
+            return tid;
         return null;
     }
 
