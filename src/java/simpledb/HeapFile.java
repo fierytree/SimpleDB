@@ -112,7 +112,7 @@ public class HeapFile implements DbFile {
         byte[] data=HeapPage.createEmptyPageData();
         HeapPageId pid=new HeapPageId(this.getId(),numPages());
         HeapPage page=new HeapPage(pid,data);
-        page.insertTuple(t);t.setRecordId(new RecordId(pid,0));
+        page.insertTuple(t);
         writePage(page);
         pages.add(page);
         return pages;

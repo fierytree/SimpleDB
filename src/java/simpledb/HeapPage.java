@@ -241,18 +241,11 @@ public class HeapPage implements Page {
      * @param t The tuple to delete
      */
     public void deleteTuple(Tuple t) throws DbException {
-        int i=0;
-        for(;i<numSlots;i++){
-            if(tuples[i].equals(t)){
-                tuples[i]=null;
-                break;
-            }
-        }
-        if(i==numSlots){
+        int n=t.getRecordId().getTupleNumber();
+        if(!isSlotUsed(n))
             throw new DbException("tuple not found");
-        }
-        int k=1<<(i%8);
-        header[i/8]-=k;
+        tuples[n]=null;
+        markSlotUsed(n,false);
     }
 
     /**
@@ -268,6 +261,7 @@ public class HeapPage implements Page {
             if(!isSlotUsed(i)){
                 tuples[i]=t;
                 markSlotUsed(i,true);
+                t.setRecordId(new RecordId(pid,i));
                 break;
             }
         }
@@ -323,10 +317,11 @@ public class HeapPage implements Page {
     private void markSlotUsed(int i, boolean value) {
         int m= (!value ?0:1)<<(i%8);
         int k=1<<(i%8);
+        int n=255-k+m;
         int judge=(header[i/8]&k)==k?1:0;
         if(judge==0)
             header[i/8]=(byte)(header[i/8]|m);
-        else header[i/8]=(byte)(header[i/8]&m);
+        else header[i/8]=(byte)(header[i/8]&n);
     }
 
     /**
