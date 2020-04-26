@@ -190,7 +190,8 @@ public class BufferPool {
      */
     public synchronized void flushAllPages() throws IOException {
         for(Page page:pages.keySet()){
-            flushPage(page.getId());
+            if(page.isDirty()!=null)
+                flushPage(page.getId());
         }
     }
 

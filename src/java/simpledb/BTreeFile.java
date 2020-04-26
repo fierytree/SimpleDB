@@ -5,6 +5,8 @@ import java.util.*;
 
 import simpledb.Predicate.Op;
 
+import static simpledb.Permissions.READ_ONLY;
+
 /**
  * BTreeFile is an implementation of a DbFile that stores a B+ tree.
  * Specifically, it stores a pointer to a root page,
@@ -194,8 +196,29 @@ public class BTreeFile implements DbFile {
 	private BTreeLeafPage findLeafPage(TransactionId tid, HashMap<PageId, Page> dirtypages, BTreePageId pid, Permissions perm,
 			Field f) 
 					throws DbException, TransactionAbortedException {
-		// some code goes here
-        return null;
+
+		Page page=getPage(tid, dirtypages, pid, perm);
+		if(pid.pgcateg()==BTreePageId.LEAF)
+			return (BTreeLeafPage)page;
+		BTreeInternalPage pip=(BTreeInternalPage)page;
+		Iterator it=pip.iterator();
+		BTreePageId pid1=new BTreePageId(0,0,0);
+		if(f==null){
+			while(it.hasNext()){
+				BTreeEntry entry=(BTreeEntry) it.next();
+				pid1=entry.getLeftChild();
+				if(pid1.pgcateg()==BTreePageId.LEAF)
+					break;
+			}
+		}
+		else while(it.hasNext()){
+			BTreeEntry entry=(BTreeEntry) it.next();
+			pid1=entry.getLeftChild();
+			if(pid1.pgcateg()==BTreePageId.LEAF&&entry.getKey().compare(Op.GREATER_THAN_OR_EQ,f))
+				break;
+		}
+		BTreeLeafPage pg=(BTreeLeafPage)getPage(tid,dirtypages,pid1,perm);
+        return pg;
 	}
 	
 	/**
@@ -354,7 +377,7 @@ public class BTreeFile implements DbFile {
 	private void updateParentPointer(TransactionId tid, HashMap<PageId, Page> dirtypages, BTreePageId pid, BTreePageId child) 
 			throws DbException, IOException, TransactionAbortedException {
 
-		BTreePage p = (BTreePage) getPage(tid, dirtypages, child, Permissions.READ_ONLY);
+		BTreePage p = (BTreePage) getPage(tid, dirtypages, child, READ_ONLY);
 
 		if(!p.getParentId().equals(pid)) {
 			p = (BTreePage) getPage(tid, dirtypages, child, Permissions.READ_WRITE);
@@ -859,7 +882,7 @@ public class BTreeFile implements DbFile {
 		}
 
 		// get a read lock on the root pointer page
-		return (BTreeRootPtrPage) getPage(tid, dirtypages, BTreeRootPtrPage.getId(tableid), Permissions.READ_ONLY);
+		return (BTreeRootPtrPage) getPage(tid, dirtypages, BTreeRootPtrPage.getId(tableid), READ_ONLY);
 	}
 
 	/**
@@ -882,13 +905,13 @@ public class BTreeFile implements DbFile {
 		int emptyPageNo = 0;
 
 		if(headerId != null) {
-			BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, Permissions.READ_ONLY);
+			BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, READ_ONLY);
 			int headerPageCount = 0;
 			// try to find a header page with an empty slot
 			while(headerPage != null && headerPage.getEmptySlot() == -1) {
 				headerId = headerPage.getNextPageId();
 				if(headerId != null) {
-					headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, Permissions.READ_ONLY);
+					headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, READ_ONLY);
 					headerPageCount++;
 				}
 				else {
@@ -1014,7 +1037,7 @@ public class BTreeFile implements DbFile {
 		// iterate through all the existing header pages to find the one containing the slot
 		// corresponding to emptyPageNo
 		while(headerId != null && (headerPageCount + 1) * BTreeHeaderPage.getNumSlots() < emptyPageNo) {
-			BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, Permissions.READ_ONLY);
+			BTreeHeaderPage headerPage = (BTreeHeaderPage) getPage(tid, dirtypages, headerId, READ_ONLY);
 			prevId = headerId;
 			headerId = headerPage.getNextPageId();
 			headerPageCount++;
@@ -1097,9 +1120,9 @@ class BTreeFileIterator extends AbstractDbFileIterator {
 	 */
 	public void open() throws DbException, TransactionAbortedException {
 		BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) Database.getBufferPool().getPage(
-				tid, BTreeRootPtrPage.getId(f.getId()), Permissions.READ_ONLY);
+				tid, BTreeRootPtrPage.getId(f.getId()), READ_ONLY);
 		BTreePageId root = rootPtr.getRootId();
-		curp = f.findLeafPage(tid, root, Permissions.READ_ONLY, null);
+		curp = f.findLeafPage(tid, root, READ_ONLY, null);
 		it = curp.iterator();
 	}
 
@@ -1121,7 +1144,7 @@ class BTreeFileIterator extends AbstractDbFileIterator {
 			}
 			else {
 				curp = (BTreeLeafPage) Database.getBufferPool().getPage(tid,
-						nextp, Permissions.READ_ONLY);
+						nextp, READ_ONLY);
 				it = curp.iterator();
 				if (!it.hasNext())
 					it = null;
@@ -1182,14 +1205,14 @@ class BTreeSearchIterator extends AbstractDbFileIterator {
 	 */
 	public void open() throws DbException, TransactionAbortedException {
 		BTreeRootPtrPage rootPtr = (BTreeRootPtrPage) Database.getBufferPool().getPage(
-				tid, BTreeRootPtrPage.getId(f.getId()), Permissions.READ_ONLY);
+				tid, BTreeRootPtrPage.getId(f.getId()), READ_ONLY);
 		BTreePageId root = rootPtr.getRootId();
 		if(ipred.getOp() == Op.EQUALS || ipred.getOp() == Op.GREATER_THAN 
 				|| ipred.getOp() == Op.GREATER_THAN_OR_EQ) {
-			curp = f.findLeafPage(tid, root, Permissions.READ_ONLY, ipred.getField());
+			curp = f.findLeafPage(tid, root, READ_ONLY, ipred.getField());
 		}
 		else {
-			curp = f.findLeafPage(tid, root, Permissions.READ_ONLY, null);
+			curp = f.findLeafPage(tid, root, READ_ONLY, null);
 		}
 		it = curp.iterator();
 	}
@@ -1230,7 +1253,7 @@ class BTreeSearchIterator extends AbstractDbFileIterator {
 			}
 			else {
 				curp = (BTreeLeafPage) Database.getBufferPool().getPage(tid,
-						nextp, Permissions.READ_ONLY);
+						nextp, READ_ONLY);
 				it = curp.iterator();
 			}
 		}
