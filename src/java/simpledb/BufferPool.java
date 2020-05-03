@@ -87,7 +87,7 @@ public class BufferPool {
         DbFile dbfile = Database.getCatalog().getDatabaseFile(pid.getTableId());
         Page p=dbfile.readPage(pid);
         pages.put(p,tid);
-        per.put(pid,perm);
+        per.put(pid,Permissions.READ_ONLY);
         findPage.put(pid,p);
         return p;
     }
@@ -204,6 +204,8 @@ public class BufferPool {
         are removed from the cache so they can be reused safely
     */
     public synchronized void discardPage(PageId pid) {
+        if(!findPage.containsKey(pid))
+            return;
         pages.remove(findPage.get(pid));
         per.remove(pid);
         findPage.remove(pid);
