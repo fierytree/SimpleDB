@@ -1,5 +1,7 @@
 package simpledb;
 
+import javafx.util.Pair;
+
 import java.io.*;
 
 import java.util.ArrayList;
@@ -18,10 +20,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
-    private ConcurrentHashMap<Page,TransactionId> pages;
-    private ConcurrentHashMap<PageId,Permissions> per;
     private ConcurrentHashMap<PageId,Page> findPage;
-    int numPages;
+    private ConcurrentHashMap<PageId, ArrayList<Pair<TransactionId,Integer>>> lockMap;
+    private int numPages;
 
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
@@ -39,9 +40,8 @@ public class BufferPool {
      * @param numPages maximum number of pages in this buffer pool.
      */
     public BufferPool(int numPages) {
-        pages=new ConcurrentHashMap<>(numPages);
-        per=new ConcurrentHashMap<>(numPages);
         findPage=new ConcurrentHashMap<>(numPages);
+        lockMap=new ConcurrentHashMap<>(numPages);
         this.numPages=numPages;
     }
 
@@ -76,19 +76,30 @@ public class BufferPool {
      */
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        for(ConcurrentHashMap.Entry<Page,TransactionId> item:pages.entrySet()){
-            if(item.getKey().getId().equals(pid)&&perm.permLevel>=per.get(pid).permLevel){
-                item.setValue(tid);
-                return item.getKey();
+        for(ConcurrentHashMap.Entry<PageId,Page> item:findPage.entrySet()){
+            if(item.getKey().equals(pid)){
+                ArrayList<Pair<TransactionId,Integer>> locks=lockMap.get(pid);
+                for(Pair<TransactionId,Integer> lock:locks){
+                    if(lock.getKey().equals(tid))break;
+                    if(lock.getValue()==1||perm.permLevel==1){
+                        try{
+                            Thread.sleep(200);
+                        }catch(Exception e){
+                            e.printStackTrace();
+                        }
+                    }
+                }
+                locks.add(new Pair<>(tid,perm.permLevel));
+                return item.getValue();
             }
         }
-        while(pages.size()>numPages)
+        while(findPage.size()>numPages)
             evictPage();
         DbFile dbfile = Database.getCatalog().getDatabaseFile(pid.getTableId());
         Page p=dbfile.readPage(pid);
-        pages.put(p,tid);
-        per.put(pid,Permissions.READ_ONLY);
         findPage.put(pid,p);
+        lockMap.put(pid,new ArrayList<>());
+        lockMap.get(pid).add(new Pair<>(tid,perm.permLevel));
         return p;
     }
 
@@ -102,8 +113,12 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public void releasePage(TransactionId tid, PageId pid) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        ArrayList<Pair<TransactionId,Integer>> locks=lockMap.get(pid);
+        for(Pair<TransactionId,Integer> lock:locks){
+            if(lock.getKey().equals(tid)){
+                locks.remove(lock);break;
+            }
+        }
     }
 
     /**
@@ -118,8 +133,12 @@ public class BufferPool {
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        ArrayList<Pair<TransactionId,Integer>> locks=lockMap.get(p);
+        for(Pair<TransactionId,Integer> lock:locks){
+            if(lock.getKey().equals(tid)){
+                return true;
+            }
+        }
         return false;
     }
 
@@ -189,7 +208,7 @@ public class BufferPool {
      *     break simpledb if running in NO STEAL mode.
      */
     public synchronized void flushAllPages() throws IOException {
-        for(Page page:pages.keySet()){
+        for(Page page:findPage.values()){
             if(page.isDirty()!=null)
                 flushPage(page.getId());
         }
@@ -206,9 +225,8 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         if(!findPage.containsKey(pid))
             return;
-        pages.remove(findPage.get(pid));
-        per.remove(pid);
         findPage.remove(pid);
+        lockMap.remove(pid);
     }
 
     /**
