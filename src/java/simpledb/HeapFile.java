@@ -128,6 +128,7 @@ public class HeapFile implements DbFile {
         p.deleteTuple(t);
         ArrayList<Page> pages=new ArrayList<>();
         pages.add(p);
+        Database.getBufferPool().releasePage(tid,pid);
         return pages;
     }
 

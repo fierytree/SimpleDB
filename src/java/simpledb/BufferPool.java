@@ -2,9 +2,7 @@ package simpledb;
 
 import java.io.*;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -21,7 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BufferPool {
     private ConcurrentHashMap<PageId,Page> findPage;
     private int numPages;
-
+    private ConcurrentHashMap<PageId,Integer> pages;
+    int age;
     public class Lock{
         TransactionId tid;
         int type;
@@ -30,15 +29,93 @@ public class BufferPool {
             this.tid=tid;this.type=type;
         }
     }
-    private ConcurrentHashMap<PageId, ArrayList<Lock>> lockMap;
+    public class node{
+        TransactionId tid;
+        ArrayList<node> dep;
+        boolean visit;
+        node(){}
+        node(TransactionId t){
+            tid=t;dep=new ArrayList<>();visit=false;
+        }
+
+        public boolean equals(Object p){
+            if(!(p instanceof node))return false;
+            node q=(node)p;
+            return q.tid.equals(tid);
+        }
+    }
+    private class LockManager{
+        final ConcurrentHashMap<PageId, ArrayList<Lock>> lockMap;
+        ArrayList<node> g=new ArrayList<>();
+        LockManager(){
+            lockMap=new ConcurrentHashMap<>(numPages);
+        }
+        public synchronized boolean acquireLock(TransactionId tid,PageId pid,int type){
+            if(lockMap.containsKey(pid)){
+                ArrayList<Lock> locks = lockMap.get(pid);
+                for (Lock lock : locks) {
+                    if (lock.tid.equals(tid)) {
+                        if(lock.type==type||lock.type==1)return true;
+                        if(locks.size()==1) {
+                            lock.type = 1;return true;
+                        }
+                        else return false;
+                    }
+                    if (lock.type == 1 || type == 1) {
+                        node p=new node(tid);
+                        node q=new node(lock.tid);
+                        if(!g.contains(p))g.add(p);
+                        else{
+                            for(node n:g)
+                                if(n.equals(p))p=n;
+                        }
+                        if(!g.contains(q))g.add(q);
+                        else{
+                            for(node n:g)
+                                if(n.equals(q))q=n;
+                        }
+                        p.dep.add(q);
+                        return false;
+                    }
+                }
+                locks.add(new Lock(tid, type));
+                return true;
+            }
+            lockMap.put(pid, new ArrayList<>());
+            lockMap.get(pid).add(new Lock(tid, type));
+            return true;
+        }
+        public synchronized boolean det_cir(){
+            for(node n:g) {
+                for(node p:g)p.visit=false;
+                Queue<node> t = new LinkedList<node>();
+                t.add(n);
+                n.visit = true;
+                while (!t.isEmpty()) {
+                    node front = t.poll();
+                    for (node p : front.dep) {
+                        if (p.visit) return true;
+                        else {
+                            t.add(p);
+                            p.visit = true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+
+    }
+    private final LockManager lockManager;
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
     private static int pageSize = DEFAULT_PAGE_SIZE;
 
     /** Default number of pages passed to the constructor. This is used by
-    other classes. BufferPool should use the numPages argument to the
-    constructor instead. */
+     other classes. BufferPool should use the numPages argument to the
+     constructor instead. */
     public static final int DEFAULT_PAGES = 50;
 
     /**
@@ -48,22 +125,24 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         findPage=new ConcurrentHashMap<>(numPages);
-        lockMap=new ConcurrentHashMap<>(numPages);
         this.numPages=numPages;
+        lockManager=new LockManager();
+        pages=new ConcurrentHashMap<>(numPages);
+        age=0;
     }
 
     public static int getPageSize() {
-      return pageSize;
+        return pageSize;
     }
 
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void setPageSize(int pageSize) {
-    	BufferPool.pageSize = pageSize;
+        BufferPool.pageSize = pageSize;
     }
 
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void resetPageSize() {
-    	BufferPool.pageSize = DEFAULT_PAGE_SIZE;
+        BufferPool.pageSize = DEFAULT_PAGE_SIZE;
     }
 
     /**
@@ -82,31 +161,19 @@ public class BufferPool {
      * @param perm the requested permissions on the page
      */
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
-        throws TransactionAbortedException, DbException {
-        for(ConcurrentHashMap.Entry<PageId,Page> item:findPage.entrySet()){
-            if(item.getKey().equals(pid)){
-                ArrayList<Lock> locks=lockMap.get(pid);
-                for(Lock lock:locks){
-                    if(lock.tid.equals(tid))break;
-                    if(lock.type==1||perm.permLevel==1){
-                        try{
-                            Thread.sleep(200);
-                        }catch(Exception e){
-                            e.printStackTrace();
-                        }
-                    }
-                }
-                locks.add(new Lock(tid,perm.permLevel));
-                return item.getValue();
-            }
+            throws TransactionAbortedException, DbException {
+        while(!lockManager.acquireLock(tid,pid,perm.permLevel)){
+            if(lockManager.det_cir())
+                throw new TransactionAbortedException();
+            //try{Thread.sleep(20);}catch (Exception e){e.printStackTrace();}
         }
-        while(findPage.size()>numPages)
+        if(findPage.containsKey(pid)) return findPage.get(pid);
+        while (findPage.size() >= numPages)
             evictPage();
         DbFile dbfile = Database.getCatalog().getDatabaseFile(pid.getTableId());
-        Page p=dbfile.readPage(pid);
-        findPage.put(pid,p);
-        lockMap.put(pid,new ArrayList<>());
-        lockMap.get(pid).add(new Lock(tid,perm.permLevel));
+        Page p = dbfile.readPage(pid);
+        findPage.put(pid, p);
+        pages.put(pid,age++);
         return p;
     }
 
@@ -120,11 +187,47 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public void releasePage(TransactionId tid, PageId pid) {
-        ArrayList<Lock> locks=lockMap.get(pid);
-        for(Lock lock:locks){
-            if(lock.tid.equals(tid)){
-                locks.remove(lock);break;
+        ArrayList<Lock> locks=lockManager.lockMap.get(pid);
+        synchronized (lockManager.lockMap){
+            TransactionId t=null;
+            for(Lock lock:locks){
+                if(lock.tid.equals(tid)){
+                    locks.remove(lock);
+                    if(lock.type==1)t=tid;
+                    break;
+                }
             }
+            for(Lock lock:locks){
+                if(lock.type==1){
+                    t=lock.tid;break;
+                }
+            }
+//            if(t!=null){
+//                node n=new node(t);
+//                if(lockManager.g.contains(n)){
+//                    for(node p:lockManager.g){
+//                        if(p.equals(n))n=p;
+//                    }
+//                    if(!t.equals(tid)){
+//                        node q=new node(tid);
+//                        for(node p:lockManager.g){
+//                            if(p.equals(q))q=p;
+//                        }
+//                        n.dep.remove(q);
+//                        q.dep.remove(n);
+//                    }
+//                    else for(Lock lock:locks){
+//                        node tmp=new node(lock.tid);
+//                        if(lockManager.g.contains(tmp)){
+//                            for(node p:lockManager.g){
+//                                if(p.equals(tmp))tmp=p;
+//                            }
+//                            n.dep.remove(tmp);
+//                            tmp.dep.remove(n);
+//                        }
+//                    }
+//                }
+//            }
         }
     }
 
@@ -139,10 +242,12 @@ public class BufferPool {
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        ArrayList<Lock> locks=lockMap.get(p);
-        for(Lock lock:locks){
-            if(lock.tid.equals(tid)){
-                return true;
+        ArrayList<Lock> locks=lockManager.lockMap.get(p);
+        synchronized (lockManager.lockMap) {
+            for (Lock lock : locks) {
+                if (lock.tid.equals(tid)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -156,7 +261,7 @@ public class BufferPool {
      * @param commit a flag indicating whether we should commit or abort
      */
     public void transactionComplete(TransactionId tid, boolean commit)
-        throws IOException {
+            throws IOException {
         if(commit){
             flushPages(tid);
         }
@@ -169,6 +274,7 @@ public class BufferPool {
                     DbFile dbFile=Database.getCatalog().getDatabaseFile(tableId);
                     Page p=dbFile.readPage(pid);
                     findPage.put(pid,p);
+                    pages.put(pid,age++);
                 }
             }
         }
@@ -185,18 +291,18 @@ public class BufferPool {
      * acquire a write lock on the page the tuple is added to and any other
      * pages that are updated (Lock acquisition is not needed for lab2).
      * May block if the lock(s) cannot be acquired.
-     * 
+     *
      * Marks any pages that were dirtied by the operation as dirty by calling
-     * their markDirty bit, and adds versions of any pages that have 
-     * been dirtied to the cache (replacing any existing versions of those pages) so 
-     * that future requests see up-to-date pages. 
+     * their markDirty bit, and adds versions of any pages that have
+     * been dirtied to the cache (replacing any existing versions of those pages) so
+     * that future requests see up-to-date pages.
      *
      * @param tid the transaction adding the tuple
      * @param tableId the table to add the tuple to
      * @param t the tuple to add
      */
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
-        throws DbException, IOException, TransactionAbortedException {
+            throws DbException, IOException, TransactionAbortedException {
         DbFile file=Database.getCatalog().getDatabaseFile(tableId);
         ArrayList<Page>pages= file.insertTuple(tid,t);
         for(Page page:pages){
@@ -210,15 +316,15 @@ public class BufferPool {
      * other pages that are updated. May block if the lock(s) cannot be acquired.
      *
      * Marks any pages that were dirtied by the operation as dirty by calling
-     * their markDirty bit, and adds versions of any pages that have 
-     * been dirtied to the cache (replacing any existing versions of those pages) so 
-     * that future requests see up-to-date pages. 
+     * their markDirty bit, and adds versions of any pages that have
+     * been dirtied to the cache (replacing any existing versions of those pages) so
+     * that future requests see up-to-date pages.
      *
      * @param tid the transaction deleting the tuple.
      * @param t the tuple to delete
      */
     public  void deleteTuple(TransactionId tid, Tuple t)
-        throws DbException, IOException, TransactionAbortedException {
+            throws DbException, IOException, TransactionAbortedException {
         int tableId=t.getRecordId().getPageId().getTableId();
         DbFile file=Database.getCatalog().getDatabaseFile(tableId);
         ArrayList<Page>pages= file.deleteTuple(tid,t);
@@ -240,18 +346,21 @@ public class BufferPool {
     }
 
     /** Remove the specific page id from the buffer pool.
-        Needed by the recovery manager to ensure that the
-        buffer pool doesn't keep a rolled back page in its
-        cache.
-        
-        Also used by B+ tree files to ensure that deleted pages
-        are removed from the cache so they can be reused safely
-    */
+     Needed by the recovery manager to ensure that the
+     buffer pool doesn't keep a rolled back page in its
+     cache.
+
+     Also used by B+ tree files to ensure that deleted pages
+     are removed from the cache so they can be reused safely
+     */
     public synchronized void discardPage(PageId pid) {
         if(!findPage.containsKey(pid))
             return;
         findPage.remove(pid);
-        lockMap.remove(pid);
+        pages.remove(pid);
+        synchronized (lockManager.lockMap) {
+            lockManager.lockMap.remove(pid);
+        }
     }
 
     /**
@@ -282,14 +391,22 @@ public class BufferPool {
      */
     private synchronized  void evictPage() throws DbException {
         Iterator it=findPage.entrySet().iterator();
+        int n=200000001;PageId p=null;
         while(it.hasNext()){
             Map.Entry entry=(Map.Entry)it.next();
             Page page=(Page)entry.getValue();
             PageId pid=(PageId)entry.getKey();
             if(page.isDirty()==null){
-                discardPage(pid);break;
+                if(pages.get(pid)<n){
+                    n=pages.get(pid);
+                    p=pid;
+                }
             }
         }
+        if(p!=null)
+            discardPage(p);
+        else
+            throw new DbException("none page to be evicted");
     }
 
 }

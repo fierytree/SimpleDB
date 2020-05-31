@@ -50,7 +50,7 @@ public class IntegerAggregator implements Aggregator {
      *            the Tuple containing an aggregate field and a group-by field
      */
     public void mergeTupleIntoGroup(Tuple tup) {
-        Field tmp=tup.getField(gbfield);
+        Field tmp = gbfield == NO_GROUPING ? null : tup.getField(gbfield);
         IntField v=(IntField)tup.getField(afield);
         int value=v.getValue();
         switch(what) {

@@ -37,9 +37,16 @@ public class Aggregate extends Operator {
      */
     public Aggregate(OpIterator child, int afield, int gfield, Aggregator.Op aop) {
         this.child=child;this.afield=afield;this.gfield=gfield;this.aop=aop;
-        if(child.getTupleDesc().getFieldType(afield)==Type.INT_TYPE)
-            aggregator=new IntegerAggregator(gfield,child.getTupleDesc().getFieldType(gfield),afield,aop);
-        else aggregator=new StringAggregator(gfield,child.getTupleDesc().getFieldType(gfield),afield,aop);
+        if(child.getTupleDesc().getFieldType(afield)==Type.INT_TYPE) {
+            if(gfield==-1)
+                aggregator = new IntegerAggregator(Aggregator.NO_GROUPING,null, afield, aop);
+            else aggregator = new IntegerAggregator(gfield, child.getTupleDesc().getFieldType(gfield), afield, aop);
+        }
+        else {
+            if(gfield==-1)
+                aggregator = new StringAggregator(Aggregator.NO_GROUPING,null, afield, aop);
+            aggregator = new StringAggregator(gfield, child.getTupleDesc().getFieldType(gfield), afield, aop);
+        }
         it=aggregator.iterator();
     }
 
