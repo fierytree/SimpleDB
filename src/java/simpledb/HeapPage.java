@@ -242,6 +242,8 @@ public class HeapPage implements Page {
      */
     public void deleteTuple(Tuple t) throws DbException {
         int n=t.getRecordId().getTupleNumber();
+        if(!t.getRecordId().getPageId().equals(getId()))
+            throw new DbException("delete wrong tuple");
         if(!isSlotUsed(n))
             throw new DbException("tuple not found");
         tuples[n]=null;

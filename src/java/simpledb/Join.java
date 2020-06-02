@@ -93,7 +93,8 @@ public class Join extends Operator {
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
         // some code goes here
-        while(child1.hasNext()){
+        while(child1.hasNext()||child2.hasNext()){
+            if(child1.hasNext())
             if(t == null) t = child1.next();
             while(child2.hasNext()){
                 Tuple t2 = child2.next();
@@ -109,8 +110,10 @@ public class Join extends Operator {
                     return newTuple;
                 }
             }
-            child2.rewind();
-            t = null;
+            if(child1.hasNext()||child2.hasNext()){
+                child2.rewind();
+                t = null;
+            }
         }
         return null;
     }

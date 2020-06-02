@@ -106,7 +106,8 @@ public class HeapFile implements DbFile {
             if(p.getNumEmptySlots()==0){
                 continue;
             }
-            Database.getBufferPool().releasePage(tid,p.getId());
+//            Database.getBufferPool().getLockManager().updateGraph(tid,p.getId());
+//            Database.getBufferPool().releasePage(tid,p.getId());
             p.insertTuple(t);
             pages.add(p);
             return pages;
@@ -128,7 +129,8 @@ public class HeapFile implements DbFile {
         p.deleteTuple(t);
         ArrayList<Page> pages=new ArrayList<>();
         pages.add(p);
-        Database.getBufferPool().releasePage(tid,pid);
+//        Database.getBufferPool().getLockManager().updateGraph(tid,pid);
+//        Database.getBufferPool().getLockManager().removeLock(tid,pid);
         return pages;
     }
 

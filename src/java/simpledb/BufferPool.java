@@ -28,14 +28,19 @@ public class BufferPool {
         Lock(TransactionId tid,int type){
             this.tid=tid;this.type=type;
         }
+        public boolean equals(Object p){
+            if(!(p instanceof Lock))return false;
+            Lock q=(Lock)p;
+            return q.tid.equals(tid);
+        }
     }
     public class node{
         TransactionId tid;
-        ArrayList<node> dep;
-        boolean visit;
+        Vector<node> dep;
+        ConcurrentHashMap<node,PageId>depPage;
         node(){}
         node(TransactionId t){
-            tid=t;dep=new ArrayList<>();visit=false;
+            tid=t;dep=new Vector<>();depPage=new ConcurrentHashMap<>();
         }
 
         public boolean equals(Object p){
@@ -44,70 +49,129 @@ public class BufferPool {
             return q.tid.equals(tid);
         }
     }
-    private class LockManager{
-        final ConcurrentHashMap<PageId, ArrayList<Lock>> lockMap;
-        ArrayList<node> g=new ArrayList<>();
+    public class LockManager{
+        final ConcurrentHashMap<PageId, Vector<Lock>> lockMap;
+        final Vector<node> g=new Vector<>();
         LockManager(){
             lockMap=new ConcurrentHashMap<>(numPages);
         }
+        public synchronized node findNode(TransactionId tid){
+            node p=new node(tid);
+                for(node n:g)
+                    if(n.tid.equals(tid))return n;
+            return p;
+        }
         public synchronized boolean acquireLock(TransactionId tid,PageId pid,int type){
             if(lockMap.containsKey(pid)){
-                ArrayList<Lock> locks = lockMap.get(pid);
+                Vector<Lock> locks = lockMap.get(pid);
                 for (Lock lock : locks) {
                     if (lock.tid.equals(tid)) {
                         if(lock.type==type||lock.type==1)return true;
                         if(locks.size()==1) {
                             lock.type = 1;return true;
                         }
-                        else return false;
+                        else {
+                            node p=findNode(tid);
+                            if(!g.contains(p))g.add(p);
+                            for(Lock lock2:locks){
+                                if(!lock2.tid.equals(tid)){
+                                    node tmp=findNode(lock2.tid);
+                                    if(!g.contains(tmp))g.add(tmp);
+                                    if(!p.dep.contains(tmp)){
+                                        p.dep.add(tmp);
+                                        p.depPage.put(tmp,pid);
+                                    }
+                                    else p.depPage.replace(tmp,pid);
+                                }
+                            }
+                            return false;
+                        }
                     }
                     if (lock.type == 1 || type == 1) {
-                        node p=new node(tid);
-                        node q=new node(lock.tid);
+                        node p=findNode(tid);
+                        node q=findNode(lock.tid);
                         if(!g.contains(p))g.add(p);
-                        else{
-                            for(node n:g)
-                                if(n.equals(p))p=n;
-                        }
                         if(!g.contains(q))g.add(q);
-                        else{
-                            for(node n:g)
-                                if(n.equals(q))q=n;
+                        if(!p.dep.contains(q)) {
+                            p.dep.add(q);
+                            p.depPage.put(q,pid);
                         }
-                        p.dep.add(q);
+                        else p.depPage.replace(q,pid);
                         return false;
                     }
                 }
                 locks.add(new Lock(tid, type));
                 return true;
             }
-            lockMap.put(pid, new ArrayList<>());
+            lockMap.put(pid, new Vector<>());
             lockMap.get(pid).add(new Lock(tid, type));
             return true;
         }
         public synchronized boolean det_cir(){
-            for(node n:g) {
-                for(node p:g)p.visit=false;
-                Queue<node> t = new LinkedList<node>();
-                t.add(n);
-                n.visit = true;
-                while (!t.isEmpty()) {
-                    node front = t.poll();
-                    for (node p : front.dep) {
-                        if (p.visit) return true;
-                        else {
-                            t.add(p);
-                            p.visit = true;
-                        }
-                    }
+            Map<node,Integer> inDegree=new ConcurrentHashMap<>(g.size());
+            for(node n:g){
+                inDegree.put(n,0);
+            }
+            for(node n:g){
+                for(node p:n.dep){
+                    int num=inDegree.get(p);
+                    inDegree.replace(p,num+1);
                 }
             }
-            return false;
+            Queue<node> queue=new LinkedList<>();
+            for(node e:inDegree.keySet()){
+                if(inDegree.get(e)==0){
+                    queue.add(e);inDegree.remove(e);
+                }
+            }
+            while(!queue.isEmpty()){
+                node e=queue.poll();
+                for(node n:e.dep){
+                    int num=inDegree.get(n);
+                    inDegree.replace(n,num-1);
+                    if(num==1){queue.add(n);inDegree.remove(n);}
+                }
+            }
+            return inDegree.size() != 0;
         }
-
-
+        public synchronized void updateGraph(TransactionId tid){
+            node n=findNode(tid);
+            if(!g.contains(n))return;
+            for(node p:g){
+                p.dep.remove(n);
+                p.depPage.remove(n);
+            }
+            g.remove(n);
+        }
+        public synchronized void updateGraph(TransactionId tid,PageId pid){
+            node n=findNode(tid);
+            if(!g.contains(n))return;
+            Vector<Lock> locks=lockManager.lockMap.get(pid);
+            for(Lock lock:locks){
+                if(lock.tid.equals(tid)){
+                    if(lock.type==0)return;
+                }
+            }
+            for(node p:g){
+                if(p.dep.contains(n)&&p.depPage.get(n).equals(pid)){
+                    p.dep.remove(n);
+                    p.depPage.remove(n);
+                }
+            }
+        }
+        public synchronized void removeLock(TransactionId tid,PageId pid){
+            for(Lock lock:lockManager.lockMap.get(pid)){
+                if(lock.tid.equals(tid)){
+                    if(lockManager.lockMap.get(pid).size()==1)
+                        lockManager.lockMap.remove(pid);
+                    else lockManager.lockMap.get(pid).remove(lock);
+                    break;
+                }
+            }
+        }
     }
     private final LockManager lockManager;
+    public LockManager getLockManager(){return lockManager;}
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
@@ -165,7 +229,7 @@ public class BufferPool {
         while(!lockManager.acquireLock(tid,pid,perm.permLevel)){
             if(lockManager.det_cir())
                 throw new TransactionAbortedException();
-            //try{Thread.sleep(20);}catch (Exception e){e.printStackTrace();}
+            try{Thread.sleep(20);}catch (Exception e){e.printStackTrace();}
         }
         if(findPage.containsKey(pid)) return findPage.get(pid);
         while (findPage.size() >= numPages)
@@ -187,48 +251,7 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public void releasePage(TransactionId tid, PageId pid) {
-        ArrayList<Lock> locks=lockManager.lockMap.get(pid);
-        synchronized (lockManager.lockMap){
-            TransactionId t=null;
-            for(Lock lock:locks){
-                if(lock.tid.equals(tid)){
-                    locks.remove(lock);
-                    if(lock.type==1)t=tid;
-                    break;
-                }
-            }
-            for(Lock lock:locks){
-                if(lock.type==1){
-                    t=lock.tid;break;
-                }
-            }
-//            if(t!=null){
-//                node n=new node(t);
-//                if(lockManager.g.contains(n)){
-//                    for(node p:lockManager.g){
-//                        if(p.equals(n))n=p;
-//                    }
-//                    if(!t.equals(tid)){
-//                        node q=new node(tid);
-//                        for(node p:lockManager.g){
-//                            if(p.equals(q))q=p;
-//                        }
-//                        n.dep.remove(q);
-//                        q.dep.remove(n);
-//                    }
-//                    else for(Lock lock:locks){
-//                        node tmp=new node(lock.tid);
-//                        if(lockManager.g.contains(tmp)){
-//                            for(node p:lockManager.g){
-//                                if(p.equals(tmp))tmp=p;
-//                            }
-//                            n.dep.remove(tmp);
-//                            tmp.dep.remove(n);
-//                        }
-//                    }
-//                }
-//            }
-        }
+        lockManager.removeLock(tid,pid);
     }
 
     /**
@@ -242,9 +265,8 @@ public class BufferPool {
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        ArrayList<Lock> locks=lockManager.lockMap.get(p);
         synchronized (lockManager.lockMap) {
-            for (Lock lock : locks) {
+            for (Lock lock : lockManager.lockMap.get(p)) {
                 if (lock.tid.equals(tid)) {
                     return true;
                 }
@@ -279,10 +301,13 @@ public class BufferPool {
             }
         }
 
-        for(PageId pid:findPage.keySet()){
+        for(PageId pid:lockManager.lockMap.keySet()){
             if(holdsLock(tid,pid)){
                 releasePage(tid,pid);
             }
+        }
+        synchronized (lockManager.g){
+            lockManager.updateGraph(tid);
         }
     }
 
@@ -307,6 +332,11 @@ public class BufferPool {
         ArrayList<Page>pages= file.insertTuple(tid,t);
         for(Page page:pages){
             page.markDirty(true,tid);
+            if(findPage.contains(page)) findPage.replace(page.getId(),page);
+            else {
+                findPage.put(page.getId(),page);
+                this.pages.put(page.getId(),age++);
+            }
         }
     }
 
@@ -330,6 +360,12 @@ public class BufferPool {
         ArrayList<Page>pages= file.deleteTuple(tid,t);
         for(Page page:pages){
             page.markDirty(true,tid);
+            page.markDirty(true,tid);
+            if(findPage.contains(page)) findPage.replace(page.getId(),page);
+            else {
+                findPage.put(page.getId(),page);
+                this.pages.put(page.getId(),age++);
+            }
         }
     }
 
