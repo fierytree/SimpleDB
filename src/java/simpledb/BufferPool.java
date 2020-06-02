@@ -143,22 +143,6 @@ public class BufferPool {
             }
             g.remove(n);
         }
-        public synchronized void updateGraph(TransactionId tid,PageId pid){
-            node n=findNode(tid);
-            if(!g.contains(n))return;
-            Vector<Lock> locks=lockManager.lockMap.get(pid);
-            for(Lock lock:locks){
-                if(lock.tid.equals(tid)){
-                    if(lock.type==0)return;
-                }
-            }
-            for(node p:g){
-                if(p.dep.contains(n)&&p.depPage.get(n).equals(pid)){
-                    p.dep.remove(n);
-                    p.depPage.remove(n);
-                }
-            }
-        }
         public synchronized void removeLock(TransactionId tid,PageId pid){
             for(Lock lock:lockManager.lockMap.get(pid)){
                 if(lock.tid.equals(tid)){
@@ -171,7 +155,6 @@ public class BufferPool {
         }
     }
     private final LockManager lockManager;
-    public LockManager getLockManager(){return lockManager;}
     /** Bytes per page, including header. */
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
